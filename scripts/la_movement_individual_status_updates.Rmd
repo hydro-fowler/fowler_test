@@ -1,0 +1,261 @@
+---
+title: "SW LA Telemetry Project"
+subtitle: "Survey period summary"
+author: "D. Fowler"
+output: html_document
+---
+## Current locations of marked individuals
+
+
+
+```{r, echo=FALSE, message=FALSE,warning = FALSE, out.width = '100%'}
+# Read in data from MoveBank
+
+library(tidyverse)
+library(mapview)
+library(sf)
+library(move)
+library(lubridate)
+library(raster)
+library(tigris)
+
+mapviewOptions(fgb = FALSE) # so we can save map as html
+
+set.seed(608)
+
+select <- dplyr::select
+
+# import data from movebank -----------------------------------------------------------------
+
+# store movebank login credentials
+login_stored <- movebankLogin(
+  username = "Fowler_WDNR",
+  password = "Adelynn!3"
+)
+###########
+# pull in IDs of pintails marked in Louisiana 2022
+duck_info <- getMovebankAnimals(
+  study = "Northern Pintail Migration Strategies (Louisiana Deployments)",
+  login = login_stored
+) %>% 
+  as_tibble() %>%
+  distinct(local_identifier)
+
+
+# find LA duck IDs
+la_ducks <- duck_info %>%
+  filter(str_detect(local_identifier, "LA-22")) %>%
+  pull()
+
+
+# import pintail data
+nopi_df <- getMovebankData(
+  study = "Northern Pintail Migration Strategies (Louisiana Deployments)",
+  login = login_stored,
+  animalName = la_ducks
+)
+############
+
+# pull in IDs of pintails / mallards marked in Louisiana 2023
+duck_info2 <- getMovebankAnimals(
+  study = "RWR - MALL and NOPI habitat use",
+  login = login_stored
+) %>%
+  as_tibble() %>%
+  distinct(local_identifier)
+
+
+# find LA duck IDs
+la_ducks2 <- duck_info2 %>%
+  filter(str_detect(local_identifier, "Jan23")) %>%
+  pull()
+
+# import pintail data
+ducks_df <- getMovebankData(
+  study = "RWR - MALL and NOPI habitat use",
+  login = login_stored,
+  animalName = la_ducks2
+)
+
+
+
+
+# prepare data - Merge both projects together-----------------------------------------------------------
+
+# clean up data from from second project
+la_nopi_df <- nopi_df %>%
+  as.data.frame() %>% # convert from movestack to data frame
+  select(location_long, location_lat, timestamp, local_identifier, tag_id, ground_speed) %>%
+  mutate(
+    local_identifier = as.factor(local_identifier),
+    deployment = NA,
+    timestamp_cst = as.POSIXct(format(timestamp,tz = "America/Chicago")),# change time zone to CST
+    day_of_year = lubridate::yday(timestamp_cst),# group data by day later to use last point of the day
+    time_of_day = format(timestamp_cst, format="%H%M"),
+    daynight = ifelse(time_of_day > "0600" & time_of_day < "1800", "Day", "Night"),
+    species = "pintail")%>%
+   select(local_identifier,deployment,timestamp_cst,location_long, location_lat,day_of_year, time_of_day,daynight, ground_speed,species)%>%
+  as_tibble()%>%  
+  filter(local_identifier != "LA-22-36-D2") # Remove this individual as it is the same as "NOPI23-21" in the second project below
+
+# clean up data from second project
+la_23_df <- ducks_df %>%
+  as.data.frame() %>% # convert from movestack to data frame
+  select(location_long, location_lat, timestamp, local_identifier, tag_id, ground_speed) %>%
+  mutate(
+    #local_identifier = as.factor(local_identifier), #IMPORTANT - keep this off; screws up mapview lines and points later on
+    deployment = local_identifier,
+    timestamp_cst = as.POSIXct(format(timestamp,tz = "America/Chicago")),# change time zone to CST
+    day_of_year = lubridate::yday(timestamp_cst),# group data by day later to use last point of the day
+    time_of_day = format(timestamp_cst, format="%H%M"),
+    daynight = ifelse(time_of_day > "0600" & time_of_day < "1800", "Day", "Night")
+  ) %>%
+   select(local_identifier,deployment,timestamp_cst,location_long, location_lat,day_of_year, time_of_day,daynight, ground_speed)%>%
+  as_tibble()
+
+
+# add species column / change local_identifier
+la_23_df <-la_23_df%>%
+  mutate(species = if_else(str_detect(local_identifier, "MALL"),"mallard","pintail"))
+
+
+
+la_23_df$local_identifier <-recode(la_23_df$local_identifier, "LacNWR 6Jan23 MALL1" = "MALL23-1",
+                                            "LacNWR 6Jan23 MALL2" = "MALL23-2",
+                                            "LacNWR 6Jan23 MALL3" = "MALL23-3",
+                                            "LacNWR 6Jan23 MALL4" = "MALL23-4",
+                                            "LacNWR 6Jan23 MALL5"  = "MALL23-5",
+                                            "LacNWR 6Jan23 MALL6"  = "MALL23-6",
+                                            "LacNWR 6Jan23 MALL7"  = "MALL23-7",
+                                            "LacNWR 6Jan23 MALL8"  = "MALL23-8", 
+                                            "LacNWR 6Jan23 MALL9" = "MALL23-9",
+                                            "LacNWR 6Jan23 MALL10" = "MALL23-10",
+                                            "LacNWR 6Jan23 MALL11" = "MALL23-11",
+                                            "LacNWR 6Jan23 MALL12" = "MALL23-12",
+                                            "RWR 7Jan23 MALL1" = "MALL23-13",
+                                            "RWR 7Jan23 MALL2" = "MALL23-14",
+                                            "RWR 8Jan23 MALL2" = "MALL23-15",
+                                            "LacNWR 14Jan23 MALL1" = "MALL23-16",
+                                            "LacNWR 14Jan23 MALL2" = "MALL23-17",
+                                            "LacNWR 14Jan23 MALL3" = "MALL23-18",
+                                            "LacNWR 14Jan23 MALL4" = "MALL23-19", 
+                                            "LacNWR 14Jan23 MALL5" = "MALL23-20", 
+                                            "LacNWR 14Jan23 MALL6" = "MALL23-21",
+                                            "LacNWR 14Jan23 MALL7" = "MALL23-22",
+                                            "LacNWR 6Jan23 NOPI1"  = "NOPI23-1",
+                                            "LacNWR 6Jan23 NOPI2"  = "NOPI23-2",
+                                            "RWR 7Jan23 NOPI1" = "NOPI23-3",
+                                            "RWR 7Jan23 NOPI2" = "NOPI23-4",
+                                            "RWR 7Jan23 NOPI3"  = "NOPI23-5",
+                                            "RWR 7Jan23 NOPI4"= "NOPI23-6",
+                                            "RWR 7Jan23 NOPI5" = "NOPI23-7",
+                                            "RWR 7Jan23 NOPI6" = "NOPI23-8",
+                                            "RWR 7Jan23 NOPI7"  = "NOPI23-9",
+                                            "RWR 7Jan23 NOPI8" = "NOPI23-10", 
+                                            "RWR 7Jan23 NOPI9" = "NOPI23-11",
+                                            "RWR 7Jan23 NOPI10" = "NOPI23-12",
+                                            "RWR 7Jan23 NOPI11" = "NOPI23-13",
+                                            "RWR 7Jan23 NOPI12" = "NOPI23-14",
+                                            "RWR 7Jan23 NOPI13" = "NOPI23-15",
+                                            "RWR 7Jan23 NOPI14" = "NOPI23-16", 
+                                            "RWR 7Jan23 NOPI15" = "NOPI23-17",
+                                            "RWR 7Jan23 NOPI16" = "NOPI23-18", 
+                                            "RWR 7Jan23 NOPI17" = "NOPI23-19",
+                                            "RWR 7Jan23 NOPI18" = "NOPI23-20",
+                                            "LacNWR 14Jan23 NOPI1"= "NOPI23-21", 
+                                            "LacNWR 14Jan23 NOPI2" = "NOPI23-22", 
+                                            "LacNWR 14Jan23 NOPI3" = "NOPI23-23",
+                                            "LacNWR 13Jan23 NOPI4" =  "NOPI23-24") 
+# convert local_identifier to factor
+la_23_df <- la_23_df %>%
+  mutate(
+    local_identifier = as.factor(local_identifier))
+
+#
+
+#la_ducks_df<-la_23_df
+
+# Combine the two datasets 
+# la_ducks_df<-rbind(la_nopi_df,la_23_df)
+la_ducks_df <- la_23_df
+unique_birds<-as_tibble(unique(la_ducks_df$local_identifier))
+
+```
+
+## Last 30 days of movement 
+
+```{r, echo=FALSE, message=FALSE,warning = FALSE, out.width = '100%'}
+# create a new id for coloring tracks (so nearby birds with sequential identifiers get contrasting colors)
+la_ducks_df <- la_ducks_df %>%
+  group_by(factor(local_identifier, levels = sample(levels(local_identifier)))) %>%  # use this to color tracks a bit better
+  mutate(id = cur_group_id())%>%
+  ungroup()# new id
+
+
+# turn into sf object
+la_ducks_sf <- la_ducks_df %>% 
+  st_as_sf( 
+    coords = c("location_long","location_lat"), 
+    crs = 4326 # WGS84
+  )
+
+# filter by week to get latest movement data; need to develop "days_since_deployment"
+la_ducks_sf <-
+  la_ducks_sf %>%
+  mutate(week = week(timestamp_cst)) %>%
+   mutate(year = year(timestamp_cst)) %>%
+  arrange(local_identifier, timestamp_cst) %>% 
+  filter(timestamp_cst >= "2023-10-01 07:00:00" & timestamp_cst <= "2024-03-12 07:00:00")%>% # Filter to get 4 days from current date # need to figure out how to automate this with max()
+  ungroup()
+        
+  
+  
+# create lines (tracks) from sf point object by individual
+la_duck_lines <- la_ducks_sf %>% 
+  arrange(local_identifier, timestamp_cst) %>% 
+  group_by(species, local_identifier, id) %>% 
+  summarise(do_union = FALSE) %>% 
+  st_cast("MULTILINESTRING") %>%
+  ungroup()
+
+#write_rds(la_duck_lines, "output/la_duck_lines.rds")
+# create last point used by each bird
+la_duck_points <- la_ducks_sf %>% 
+  arrange(local_identifier, timestamp_cst) %>% 
+  group_by(species, local_identifier) %>%
+  slice_tail(n = 1) %>%
+  group_by(local_identifier, id) %>% 
+  #summarise(do_union = FALSE) %>% 
+  st_cast("MULTIPOINT") %>%
+  ungroup()
+
+# create interactive map --------------------------------------------------
+mapviewOptions(basemaps = c("CartoDB.Positron","OpenStreetMap.DE","Esri.WorldImagery","OpenTopoMap"))
+duck_lines<-mapview(la_duck_lines, zcol="local_identifier", burst = T,homebutton = F)
+
+
+duck_points<-mapview(la_duck_points, zcol="local_identifier",burst = T, homebutton = F)
+
+
+# read in parish data for study area
+la_counties<-readRDS("C:/Users/DFowler/OneDrive - LSU AgCenter/lsu/research/projects/chenierplain_telemetry/r_spatial_exploration/output/la_counties.rds")
+
+# read in coastal region to filter birds in the rice portion of the study area
+coastal_poly2<-st_read("C:/Users/DFowler/OneDrive - LSU AgCenter/lsu/research/projects/chenierplain_telemetry/r_spatial_exploration/data/coastal/LA_Coastal_Basins.shp")
+
+la_counties <- la_counties %>%
+  st_transform(., st_crs(coastal_poly2))
+
+rice_area<-st_difference(st_union(la_counties),st_union(coastal_poly2))
+
+rice_section<-mapview(rice_area,homebutton = F)
+
+# plot maps
+current_locations <- duck_lines + duck_points +rice_section 
+#write_rds(current_locations, "output/current_locations.rds")
+current_locations
+
+
+
+```
+
